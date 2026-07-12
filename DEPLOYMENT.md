@@ -65,6 +65,35 @@ commits the updated `data/lead_discovery.db` back to the repo (small,
 automated commits from `github-actions[bot]`) and exports any new leads
 to your Google Sheet.
 
+## Changing search terms, scoring, or other settings
+
+Non-secret config (search terms, countries, minimum score, log level,
+etc.) lives in **`config/pipeline.env`** - a plain text file, not YAML,
+not a secret. To change it:
+
+1. Open `config/pipeline.env` directly on GitHub (click the file, then
+   the pencil icon to edit).
+2. Change the value you need, e.g.:
+   ```
+   SEARCH_TERMS=paid media,performance marketing,media buyer,paid social,PPC,media planner
+   ```
+3. Commit directly to `main`.
+
+The next run (scheduled or manually triggered) picks up the change
+automatically - no need to touch the workflow files in `.github/workflows/`
+at all. Those only handle secrets and orchestration now.
+
+## Recovering from a manually-cleared Google Sheet
+
+If you delete rows from the sheet directly, the pipeline won't
+automatically re-send them - it tracks "already exported" in the
+database, not by re-reading the sheet. To recover:
+
+Go to **Actions → Reset Export Status → Run workflow**. This resets
+every lead's export flag (the leads themselves were never deleted,
+only marked as already-sent) so the next Daily run re-sends everything
+currently in the database.
+
 ## Rotating the service account key
 
 Since the key was shared in a chat conversation, rotate it once this is
