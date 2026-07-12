@@ -162,6 +162,33 @@ class Database:
         )
         self._conn.commit()
 
+    def reset_exported_status(self, job_hashes: list[str] | None = None) -> int:
+        """Clear exported_at so the given leads (or all leads, if
+        job_hashes is None) are treated as unexported again and get
+        re-sent to Google Sheets on the next run.
+
+        Intended for recovering from a manually-cleared or corrupted
+        sheet: the leads themselves are never lost (they stay in this
+        database regardless of what happens to the sheet), only the
+        "was this sent" flag needs resetting.
+
+        Returns the number of rows updated.
+        """
+        if job_hashes is None:
+            cursor = self._conn.execute(
+                "UPDATE leads SET exported_at = NULL WHERE exported_at IS NOT NULL"
+            )
+        else:
+            if not job_hashes:
+                return 0
+            placeholders = ",".join("?" * len(job_hashes))
+            cursor = self._conn.execute(
+                f"UPDATE leads SET exported_at = NULL WHERE job_hash IN ({placeholders})",
+                job_hashes,
+            )
+        self._conn.commit()
+        return cursor.rowcount
+
     # --- companies --------------------------------------------------------
 
     def upsert_company(self, company: Company) -> None:

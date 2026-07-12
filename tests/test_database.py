@@ -100,6 +100,54 @@ class TestLeads:
         db.mark_exported([job.dedup_hash()])
         assert db.get_unexported_leads() == []
 
+    def test_reset_exported_status_all_leads(self, db: Database) -> None:
+        job_a = _sample_job(job_title="Paid Media Manager", job_url="https://x.com/1")
+        job_b = _sample_job(job_title="Media Buyer", job_url="https://x.com/2")
+        for job in (job_a, job_b):
+            db.mark_seen(job)
+            db.insert_lead(job, score=90)
+        db.mark_exported([job_a.dedup_hash(), job_b.dedup_hash()])
+        assert db.get_unexported_leads() == []
+
+        updated_count = db.reset_exported_status()
+
+        assert updated_count == 2
+        assert len(db.get_unexported_leads()) == 2
+
+    def test_reset_exported_status_specific_hashes_only(self, db: Database) -> None:
+        job_a = _sample_job(job_title="Paid Media Manager", job_url="https://x.com/1")
+        job_b = _sample_job(job_title="Media Buyer", job_url="https://x.com/2")
+        for job in (job_a, job_b):
+            db.mark_seen(job)
+            db.insert_lead(job, score=90)
+        db.mark_exported([job_a.dedup_hash(), job_b.dedup_hash()])
+
+        updated_count = db.reset_exported_status([job_a.dedup_hash()])
+
+        assert updated_count == 1
+        unexported = db.get_unexported_leads()
+        assert len(unexported) == 1
+        assert unexported[0]["job_hash"] == job_a.dedup_hash()
+
+    def test_reset_exported_status_empty_list_is_a_no_op(self, db: Database) -> None:
+        job = _sample_job()
+        db.mark_seen(job)
+        db.insert_lead(job, score=90)
+        db.mark_exported([job.dedup_hash()])
+
+        updated_count = db.reset_exported_status([])
+
+        assert updated_count == 0
+        assert db.get_unexported_leads() == []
+
+    def test_reset_exported_status_on_already_unexported_leads_updates_zero(self, db: Database) -> None:
+        job = _sample_job()
+        db.mark_seen(job)
+        db.insert_lead(job, score=90)
+        # Never exported - reset should find nothing to update.
+        updated_count = db.reset_exported_status()
+        assert updated_count == 0
+
     def test_leads_ordered_by_score_descending(self, db: Database) -> None:
         low = _sample_job(job_title="Campaign Manager", job_url="https://x.com/1")
         high = _sample_job(job_title="Paid Media Manager", job_url="https://x.com/2")

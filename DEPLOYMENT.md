@@ -1,140 +1,74 @@
-"""Unit tests for storage/database.py using an in-memory SQLite DB."""
-from datetime import date, datetime
+# Deploying to GitHub Actions
 
-import pytest
+This runs the daily lead discovery pipeline entirely on GitHub's servers -
+no local Python, no admin rights, no laptop that needs to stay on.
 
-from models.company import Company
-from models.job import Job
-from storage.database import Database
+## 1. Get the code into your repository
 
+Since you can't run `git`/`pip` locally, the easiest path is GitHub's
+web upload:
 
-@pytest.fixture
-def db() -> Database:
-    database = Database(":memory:")
-    database.initialize_schema()
-    yield database
-    database.close()
+1. Go to https://github.com/d-squa/leads
+2. Click **Add file → Upload files**
+3. Drag the entire `lead-discovery` folder (all of it, including the
+   `.github` folder) into the browser window. Modern Chrome/Edge/Firefox
+   preserve the folder structure on drop.
+4. Commit directly to `main`.
 
+**Do NOT upload `.env` or `credentials/service_account.json`** if you have
+local copies with real secrets in them - those go into GitHub Secrets
+instead (step 3 below), never into the repository itself.
 
-def _sample_job(**overrides: object) -> Job:
-    defaults: dict[str, object] = dict(
-        company="Acme Real Estate",
-        job_title="Paid Media Manager",
-        location="Doha, Qatar",
-        country="Qatar",
-        source="jooble",
-        job_url="https://example.com/jobs/123",
-        posted_date=date(2026, 7, 1),
-        description="Great opportunity for a paid media manager.",
-    )
-    defaults.update(overrides)
-    return Job(**defaults)  # type: ignore[arg-type]
+## 2. Confirm the database file made it in
 
+`data/lead_discovery.db` (an initialized-but-empty SQLite file) needs to
+be in the repo - it's how the dedup ledger persists between runs, since
+every GitHub Actions run starts on a brand new machine. It's a small
+binary file; it should upload fine via the same drag-and-drop.
 
-class TestSchema:
-    def test_initialize_schema_creates_tables(self, db: Database) -> None:
-        cursor = db._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        )
-        tables = {row["name"] for row in cursor.fetchall()}
-        assert {"companies", "jobs_seen", "leads"}.issubset(tables)
+## 3. Add repository secrets
 
-    def test_initialize_schema_is_idempotent(self, db: Database) -> None:
-        # Calling twice must not raise or duplicate anything.
-        db.initialize_schema()
-        db.initialize_schema()
+Go to **Settings → Secrets and variables → Actions → New repository
+secret** and add:
 
+| Secret name | Value |
+|---|---|
+| `JOOBLE_API_KEY` | Your Jooble API key |
+| `GOOGLE_SHEET_ID` | `1Vz1x7Z09lzhXwALGE0TvTzZrFp-I2Pba3LWIVdGRMQE` (just the ID, not the full URL) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | The **entire contents** of your service account JSON file, pasted as-is |
+| `ADZUNA_APP_ID` | Leave unset until approved - the workflow handles a blank value fine |
+| `ADZUNA_APP_KEY` | Same as above |
 
-class TestJobsSeenDedup:
-    def test_mark_seen_first_time_returns_true(self, db: Database) -> None:
-        job = _sample_job()
-        assert db.mark_seen(job) is True
-        assert db.has_seen(job.dedup_hash()) is True
+Non-secret config (search terms, score threshold, etc.) is already set
+directly in `.github/workflows/daily-run.yml` - edit that file in GitHub
+if you want to change them, no secret needed.
 
-    def test_mark_seen_duplicate_returns_false(self, db: Database) -> None:
-        job = _sample_job()
-        db.mark_seen(job)
-        assert db.mark_seen(job) is False
+## 4. Share the Google Sheet with the service account
 
-    def test_has_seen_false_for_unknown_hash(self, db: Database) -> None:
-        assert db.has_seen("nonexistent-hash") is False
+Open your sheet → **Share** → add the `client_email` from your service
+account JSON (looks like `...@actiplan-444114.iam.gserviceaccount.com`)
+as an **Editor**. Without this the export step will fail every run.
 
-    def test_different_jobs_produce_different_hashes(self, db: Database) -> None:
-        job_a = _sample_job(job_title="Paid Media Manager")
-        job_b = _sample_job(job_title="Media Buyer")
-        assert job_a.dedup_hash() != job_b.dedup_hash()
+## 5. Test it
 
-    def test_same_job_different_url_same_hash(self, db: Database) -> None:
-        # Dedup key deliberately ignores job_url, since ATS platforms
-        # sometimes reissue the same posting under a new URL.
-        job_a = _sample_job(job_url="https://example.com/jobs/123")
-        job_b = _sample_job(job_url="https://example.com/jobs/999-edited")
-        assert job_a.dedup_hash() == job_b.dedup_hash()
+Go to the **Actions** tab → **Daily Lead Discovery Run** → **Run workflow**
+button (this is the `workflow_dispatch` trigger - it lets you run on
+demand instead of waiting for the schedule). Watch the run's log output
+directly in the browser - this is your primary way to see what happened
+each day, equivalent to what main.py would print locally.
 
+## 6. Ongoing operation
 
-class TestLeads:
-    def test_insert_lead_succeeds(self, db: Database) -> None:
-        job = _sample_job()
-        db.mark_seen(job)
-        assert db.insert_lead(job, score=100) is True
+Once the test run succeeds, it runs automatically every day at 06:00 UTC
+(edit the `cron` line in the workflow file to change the time). Each run:
+commits the updated `data/lead_discovery.db` back to the repo (small,
+automated commits from `github-actions[bot]`) and exports any new leads
+to your Google Sheet.
 
-    def test_insert_lead_duplicate_returns_false(self, db: Database) -> None:
-        job = _sample_job()
-        db.mark_seen(job)
-        db.insert_lead(job, score=100)
-        assert db.insert_lead(job, score=100) is False
+## Rotating the service account key
 
-    def test_get_unexported_leads_returns_new_lead(self, db: Database) -> None:
-        job = _sample_job()
-        db.mark_seen(job)
-        db.insert_lead(job, score=90)
-        unexported = db.get_unexported_leads()
-        assert len(unexported) == 1
-        assert unexported[0]["company"] == "Acme Real Estate"
-        assert unexported[0]["status"] == "New"
-
-    def test_mark_exported_excludes_from_unexported(self, db: Database) -> None:
-        job = _sample_job()
-        db.mark_seen(job)
-        db.insert_lead(job, score=90)
-        db.mark_exported([job.dedup_hash()])
-        assert db.get_unexported_leads() == []
-
-    def test_leads_ordered_by_score_descending(self, db: Database) -> None:
-        low = _sample_job(job_title="Campaign Manager", job_url="https://x.com/1")
-        high = _sample_job(job_title="Paid Media Manager", job_url="https://x.com/2")
-        db.mark_seen(low)
-        db.insert_lead(low, score=70)
-        db.mark_seen(high)
-        db.insert_lead(high, score=100)
-        leads = db.get_unexported_leads()
-        assert [lead["score"] for lead in leads] == [100, 70]
-
-
-class TestCompanies:
-    def test_upsert_company_inserts_new(self, db: Database) -> None:
-        company = Company(
-            name="Acme Real Estate",
-            discovered_via="jooble",
-            discovered_at=datetime(2026, 7, 1, 9, 0, 0),
-        )
-        db.upsert_company(company)
-        row = db.get_company("Acme Real Estate")
-        assert row is not None
-        assert row["discovered_via"] == "jooble"
-
-    def test_upsert_company_does_not_duplicate(self, db: Database) -> None:
-        company = Company(
-            name="Acme Real Estate",
-            discovered_via="jooble",
-            discovered_at=datetime(2026, 7, 1, 9, 0, 0),
-        )
-        db.upsert_company(company)
-        db.upsert_company(company)
-        cursor = db._conn.execute(
-            "SELECT COUNT(*) as cnt FROM companies WHERE name = ?", ("Acme Real Estate",)
-        )
-        assert cursor.fetchone()["cnt"] == 1
-
-    def test_get_company_returns_none_when_missing(self, db: Database) -> None:
-        assert db.get_company("Nonexistent Co") is None
+Since the key was shared in a chat conversation, rotate it once this is
+confirmed working: Google Cloud Console → IAM & Admin → Service Accounts
+→ your account → Keys → delete the old key, generate a new one, and
+update the `GOOGLE_SERVICE_ACCOUNT_JSON` secret with the new file's
+contents.

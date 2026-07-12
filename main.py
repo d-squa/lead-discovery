@@ -1,79 +1,155 @@
-"""Unit tests for sources/ats_watchlist.py."""
-import json
+"""
+ActiPlan Lead Discovery Engine - entrypoint.
 
-import pytest
+Wires configuration, sources, filtering, scoring, and storage into
+the orchestrator and runs one full pipeline pass. Google Sheets export
+is not yet wired in here (Milestone 6) - this run ends at persisting
+qualified leads to SQLite.
 
-from sources.ats_watchlist import AtsTarget, AtsWatchlistError, load_ats_watchlist
+Run:
+    python main.py
+"""
+from __future__ import annotations
+
+import sys
+
+from config import ConfigError, Settings, get_settings
+from core.job_filter import JobFilter
+from core.scoring import ScoringConfigError, ScoringEngine
+from pipeline.orchestrator import Orchestrator
+from sources.adzuna import AdzunaSource
+from sources.ashby import AshbySource
+from sources.ats_watchlist import AtsWatchlistError, load_ats_watchlist
+from sources.base import JobSource
+from sources.greenhouse import GreenhouseSource
+from sources.jooble import JoobleSource
+from sources.lever import LeverSource
+from sources.reed import ReedSource
+from storage.database import Database
+from storage.google_sheet import GoogleSheetError, GoogleSheetExporter
+from utils.logger import configure_logging, get_logger
 
 
-class TestLoadAtsWatchlist:
-    def test_loads_valid_watchlist(self, tmp_path) -> None:
-        path = tmp_path / "watchlist.json"
-        path.write_text(
-            json.dumps(
-                {
-                    "greenhouse": [{"slug": "acme", "company_name": "Acme Corp"}],
-                    "lever": [],
-                    "ashby": [{"slug": "beta", "company_name": "Beta Inc"}],
-                }
+def _build_sources(settings: Settings) -> list[JobSource]:
+    """Instantiate every configured, enabled discovery and ATS source.
+
+    A source with no credentials/watchlist entries configured is simply
+    omitted here, not an error - config.py already guarantees at least
+    one Tier 1 discovery source is enabled before the app can start;
+    Tier 2 ATS sources are optional on top of that.
+    """
+    sources: list[JobSource] = []
+    if settings.sources.jooble_enabled:
+        sources.append(JoobleSource(api_key=settings.sources.jooble_api_key))
+    if settings.sources.reed_enabled:
+        sources.append(ReedSource(api_key=settings.sources.reed_api_key))
+    if settings.sources.adzuna_enabled:
+        sources.append(
+            AdzunaSource(
+                app_id=settings.sources.adzuna_app_id, app_key=settings.sources.adzuna_app_key
             )
         )
-        result = load_ats_watchlist(path)
 
-        assert result["greenhouse"] == (AtsTarget(slug="acme", company_name="Acme Corp"),)
-        assert result["lever"] == ()
-        assert result["ashby"] == (AtsTarget(slug="beta", company_name="Beta Inc"),)
+    if settings.ats_watchlist_file is not None:
+        try:
+            watchlist = load_ats_watchlist(settings.ats_watchlist_file)
+        except AtsWatchlistError as exc:
+            get_logger(__name__).error("Failed to load ATS watchlist, skipping ATS sources: %s", exc)
+            watchlist = {"greenhouse": (), "lever": (), "ashby": ()}
 
-    def test_missing_platform_key_returns_empty_tuple(self, tmp_path) -> None:
-        path = tmp_path / "watchlist.json"
-        path.write_text(json.dumps({"greenhouse": [{"slug": "acme", "company_name": "Acme Corp"}]}))
+        if watchlist["greenhouse"]:
+            sources.append(GreenhouseSource(targets=watchlist["greenhouse"]))
+        if watchlist["lever"]:
+            sources.append(LeverSource(targets=watchlist["lever"]))
+        if watchlist["ashby"]:
+            sources.append(AshbySource(targets=watchlist["ashby"]))
 
-        result = load_ats_watchlist(path)
+    return sources
 
-        assert result["lever"] == ()
-        assert result["ashby"] == ()
 
-    def test_ignores_underscore_metadata_key(self, tmp_path) -> None:
-        path = tmp_path / "watchlist.json"
-        path.write_text(json.dumps({"_comment": "instructions", "greenhouse": [], "lever": [], "ashby": []}))
+def _export_leads(settings: Settings, database: Database) -> None:
+    """Export any unexported leads to Google Sheets. Non-fatal: a
+    failure here is logged and the run still exits cleanly - leads
+    stay marked unexported in the DB and are retried next run."""
+    logger = get_logger(__name__)
 
-        result = load_ats_watchlist(path)
+    if not settings.google_sheet_id:
+        logger.info("GOOGLE_SHEET_ID not set, skipping Google Sheets export.")
+        return
 
-        assert result["greenhouse"] == ()
+    unexported = database.get_unexported_leads()
+    if not unexported:
+        logger.info("No unexported leads to send to Google Sheets.")
+        return
 
-    def test_missing_file_raises(self, tmp_path) -> None:
-        with pytest.raises(AtsWatchlistError, match="Could not read"):
-            load_ats_watchlist(tmp_path / "does_not_exist.json")
+    try:
+        exporter = GoogleSheetExporter(
+            sheet_id=settings.google_sheet_id,
+            service_account_file=settings.google_service_account_file,
+        )
+        exported_hashes = exporter.export_leads(unexported)
+        database.mark_exported(exported_hashes)
+        logger.info("Exported %d lead(s) to Google Sheets.", len(exported_hashes))
+    except GoogleSheetError as exc:
+        logger.error("Google Sheets export failed, leads remain unexported: %s", exc)
+    except Exception as exc:  # noqa: BLE001 - defensive: export must never
+        # crash the run, same principle as per-source isolation in the
+        # orchestrator. Anything not already wrapped as GoogleSheetError
+        # still needs to be caught here rather than propagate.
+        logger.exception("Unexpected error during Google Sheets export, leads remain unexported: %s", exc)
 
-    def test_invalid_json_raises(self, tmp_path) -> None:
-        path = tmp_path / "watchlist.json"
-        path.write_text("{not valid json")
-        with pytest.raises(AtsWatchlistError, match="not valid JSON"):
-            load_ats_watchlist(path)
 
-    def test_entry_missing_slug_raises(self, tmp_path) -> None:
-        path = tmp_path / "watchlist.json"
-        path.write_text(json.dumps({"greenhouse": [{"company_name": "Acme Corp"}]}))
-        with pytest.raises(AtsWatchlistError, match="slug"):
-            load_ats_watchlist(path)
+def main() -> int:
+    """Application entrypoint. Returns a process exit code."""
+    try:
+        settings = get_settings()
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 1
 
-    def test_entry_missing_company_name_raises(self, tmp_path) -> None:
-        path = tmp_path / "watchlist.json"
-        path.write_text(json.dumps({"greenhouse": [{"slug": "acme"}]}))
-        with pytest.raises(AtsWatchlistError, match="company_name"):
-            load_ats_watchlist(path)
+    configure_logging(settings.log_level, settings.log_file)
+    logger = get_logger(__name__)
 
-    def test_platform_value_not_a_list_raises(self, tmp_path) -> None:
-        path = tmp_path / "watchlist.json"
-        path.write_text(json.dumps({"greenhouse": "not-a-list"}))
-        with pytest.raises(AtsWatchlistError, match="must be a list"):
-            load_ats_watchlist(path)
+    logger.info("ActiPlan Lead Discovery Engine starting up")
+    logger.info(
+        "Discovery sources enabled: jooble=%s adzuna=%s reed=%s",
+        settings.sources.jooble_enabled,
+        settings.sources.adzuna_enabled,
+        settings.sources.reed_enabled,
+    )
 
-    def test_real_project_watchlist_file_loads_successfully(self) -> None:
-        # Guards against the shipped config/ats_watchlist.json ever
-        # becoming invalid without a test catching it.
-        from pathlib import Path
+    try:
+        scoring_engine = ScoringEngine.from_file(settings.title_scores_file)
+    except ScoringConfigError as exc:
+        logger.error("Failed to load scoring configuration: %s", exc)
+        return 1
 
-        real_path = Path(__file__).parent.parent / "config" / "ats_watchlist.json"
-        result = load_ats_watchlist(real_path)
-        assert set(result.keys()) == {"greenhouse", "lever", "ashby"}
+    job_filter = JobFilter(
+        canonical_titles=scoring_engine.canonical_titles,
+        threshold=settings.fuzzy_match_threshold,
+    )
+    sources = _build_sources(settings)
+
+    with Database(settings.database_path) as database:
+        database.initialize_schema()
+
+        orchestrator = Orchestrator(
+            sources=sources,
+            database=database,
+            job_filter=job_filter,
+            scoring_engine=scoring_engine,
+            search_terms=settings.search_terms,
+            search_countries=settings.search_countries,
+            min_score=settings.min_score,
+        )
+        stats = orchestrator.run()
+        _export_leads(settings, database)
+
+    if stats.errors:
+        logger.warning("Run completed with %d error(s) - see log above for details.", len(stats.errors))
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
