@@ -8,7 +8,7 @@ import pytest
 
 from models.job import Job
 from storage.database import Database
-from storage.google_sheet import GoogleSheetError, GoogleSheetExporter
+from storage.google_sheet import GoogleSheetError, GoogleSheetExporter, _HEADER
 
 
 def _job(**overrides: object) -> Job:
@@ -41,7 +41,7 @@ def _mock_client_with_worksheet(header_present: bool = True) -> tuple[MagicMock,
     """Build a mock gspread client whose open_by_key().worksheet()
     chain returns a controllable mock worksheet."""
     worksheet = MagicMock()
-    worksheet.row_values.return_value = ["Score", "Company"] if header_present else []
+    worksheet.row_values.return_value = list(_HEADER) if header_present else []
 
     spreadsheet = MagicMock()
     spreadsheet.worksheet.return_value = worksheet
@@ -108,10 +108,38 @@ class TestExportLeads:
 
         exporter.export_leads(database.get_unexported_leads())
 
-        header_call = worksheet.append_row.call_args[0][0]
-        assert header_call == [
-            "Score", "Company", "Job Title", "Salary", "Location", "Country",
+        worksheet.update.assert_called_once()
+        args, _ = worksheet.update.call_args
+        assert args[1] == [
+            ["Score", "Company", "Job Title", "Salary", "Location", "Country",
+             "Source", "Job URL", "Date Found", "Status"]
+        ]
+
+    def test_overwrites_stale_header_that_predates_a_column_change(self, database: Database) -> None:
+        # Regression test for the actual production bug: a sheet
+        # created before the Salary column was added had an old
+        # 9-column header. Since only "is the header empty?" was
+        # checked (not "does it match?"), new 10-column rows got
+        # appended underneath the stale header, shifting every column
+        # one to the right relative to its own label.
+        worksheet = MagicMock()
+        worksheet.row_values.return_value = [
+            "Score", "Company", "Job Title", "Location", "Country",
             "Source", "Job URL", "Date Found", "Status",
+        ]  # old header, missing "Salary"
+        spreadsheet = MagicMock()
+        spreadsheet.worksheet.return_value = worksheet
+        client = MagicMock()
+        client.open_by_key.return_value = spreadsheet
+
+        exporter = GoogleSheetExporter(sheet_id="abc123", client=client)
+        exporter.export_leads(database.get_unexported_leads())
+
+        worksheet.update.assert_called_once()
+        args, _ = worksheet.update.call_args
+        assert args[1] == [
+            ["Score", "Company", "Job Title", "Salary", "Location", "Country",
+             "Source", "Job URL", "Date Found", "Status"]
         ]
 
     def test_does_not_rewrite_header_when_already_present(self, database: Database) -> None:
@@ -121,6 +149,7 @@ class TestExportLeads:
         exporter.export_leads(database.get_unexported_leads())
 
         worksheet.append_row.assert_not_called()
+        worksheet.update.assert_not_called()
 
     def test_creates_worksheet_when_missing(self, database: Database) -> None:
         new_worksheet = MagicMock()

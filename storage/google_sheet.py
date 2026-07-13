@@ -130,8 +130,34 @@ class GoogleSheetExporter:
         else:
             try:
                 first_row = worksheet.row_values(1)
-                if not first_row:
-                    worksheet.append_row(_HEADER)
+                if first_row != _HEADER:
+                    if not first_row:
+                        logger.info(
+                            "Worksheet %r has no header, writing one", self._worksheet_name
+                        )
+                    else:
+                        # The important case: a header exists but doesn't
+                        # match what we're about to write - typically
+                        # because the column set changed (e.g. a new
+                        # column was inserted) since this sheet was
+                        # first created. Overwriting the header alone
+                        # does NOT fix the alignment of existing data
+                        # rows below it - those were appended under the
+                        # OLD column layout and will now read against
+                        # the wrong labels. This must never happen
+                        # silently again.
+                        logger.warning(
+                            "Worksheet %r header does not match expected columns. "
+                            "Found: %r. Expected: %r. Overwriting the header, but "
+                            "existing data rows below may now be misaligned - if "
+                            "this sheet has old data in it, clear the data rows "
+                            "and use the Reset Export Status workflow to re-send "
+                            "everything cleanly under the new column layout.",
+                            self._worksheet_name,
+                            first_row,
+                            _HEADER,
+                        )
+                    worksheet.update("A1", [_HEADER])
             except Exception as exc:
                 raise GoogleSheetError(f"Could not read/write header row: {_describe_exception(exc)}") from exc
 
