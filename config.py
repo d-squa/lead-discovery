@@ -57,6 +57,7 @@ class Settings:
     # Search
     search_terms: tuple[str, ...]
     search_countries: tuple[str, ...]
+    exclude_terms: tuple[str, ...]
 
     # Filtering
     title_scores_file: Path
@@ -127,6 +128,7 @@ def _load_settings(env_file: str | None = None) -> Settings:
         raise ConfigError("SEARCH_TERMS must contain at least one term.")
 
     search_countries = _split_csv(env.get("SEARCH_COUNTRIES", ""))
+    exclude_terms = _split_csv(env.get("EXCLUDE_TERMS", ""))
 
     title_scores_file = Path(_require(env, "TITLE_SCORES_FILE"))
     if not title_scores_file.exists():
@@ -189,6 +191,7 @@ def _load_settings(env_file: str | None = None) -> Settings:
         sources=sources,
         search_terms=search_terms,
         search_countries=search_countries,
+        exclude_terms=exclude_terms,
         title_scores_file=title_scores_file,
         fuzzy_match_threshold=fuzzy_match_threshold,
         ats_watchlist_file=ats_watchlist_file,

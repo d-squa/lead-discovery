@@ -1,7 +1,7 @@
 """Unit tests for core/job_filter.py."""
 import pytest
 
-from core.job_filter import JobFilter, normalize_title
+from core.job_filter import ExcludeFilter, JobFilter, normalize_title
 
 CANONICAL_TITLES = (
     "Paid Media Manager",
@@ -106,3 +106,37 @@ class TestJobFilterMatch:
         loose_result = loose_filter.match(ambiguous_title)
         assert loose_result is not None
         assert strict_result is None or strict_result == loose_result
+
+
+class TestExcludeFilter:
+    def test_no_terms_configured_excludes_nothing(self) -> None:
+        exclude_filter = ExcludeFilter(())
+        assert exclude_filter.is_excluded("Paid Media Manager") is False
+        assert exclude_filter.is_excluded("Marketing Intern") is False
+
+    def test_excludes_exact_substring_match(self) -> None:
+        exclude_filter = ExcludeFilter(("Intern",))
+        assert exclude_filter.is_excluded("Marketing Intern") is True
+
+    def test_excludes_case_insensitively(self) -> None:
+        exclude_filter = ExcludeFilter(("intern",))
+        assert exclude_filter.is_excluded("MARKETING INTERN") is True
+
+    def test_substring_match_catches_compound_words(self) -> None:
+        # Deliberate behavior, not a bug: "Intern" also excludes
+        # "Internship" since it's a substring match, not whole-word.
+        exclude_filter = ExcludeFilter(("Intern",))
+        assert exclude_filter.is_excluded("Marketing Internship Program") is True
+
+    def test_does_not_exclude_unrelated_title(self) -> None:
+        exclude_filter = ExcludeFilter(("Intern", "Volunteer"))
+        assert exclude_filter.is_excluded("Paid Media Manager") is False
+
+    def test_multiple_terms_any_match_excludes(self) -> None:
+        exclude_filter = ExcludeFilter(("Intern", "Volunteer", "Unpaid"))
+        assert exclude_filter.is_excluded("Unpaid Marketing Assistant") is True
+
+    def test_blank_terms_in_list_are_ignored(self) -> None:
+        exclude_filter = ExcludeFilter(("", "  ", "Intern"))
+        assert exclude_filter.is_excluded("Marketing Intern") is True
+        assert exclude_filter.is_excluded("Paid Media Manager") is False

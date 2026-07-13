@@ -44,13 +44,19 @@ class TestJobDedupHash:
 class TestRunStats:
     def test_summary_contains_all_counters(self) -> None:
         stats = RunStats(
-            jobs_checked=100, jobs_matched=20, jobs_ignored=80, jobs_duplicate=5, jobs_inserted=15
+            jobs_checked=100,
+            jobs_matched=20,
+            jobs_excluded=3,
+            jobs_ignored=80,
+            jobs_duplicate=5,
+            jobs_inserted=15,
         )
         stats.record_error("source X timed out")
         stats.finish()
         summary = stats.summary()
         assert "Jobs checked: 100" in summary
         assert "Matched: 20" in summary
+        assert "Excluded: 3" in summary
         assert "Ignored: 80" in summary
         assert "Duplicates: 5" in summary
         assert "Inserted: 15" in summary

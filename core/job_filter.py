@@ -51,6 +51,28 @@ def normalize_title(raw_title: str) -> str:
     return text
 
 
+class ExcludeFilter:
+    """Excludes jobs whose title contains any configured exclude term.
+
+    Simple case-insensitive substring matching, deliberately not fuzzy
+    like JobFilter.match() - exclude terms are blocklist words
+    ("Intern", "Volunteer", "Unpaid"), not role variants that need
+    tolerance for phrasing differences. Substring matching is more
+    predictable here: no risk of an exclude term fuzzy-matching
+    something it shouldn't.
+    """
+
+    def __init__(self, exclude_terms: tuple[str, ...]) -> None:
+        self._exclude_terms = tuple(term.lower() for term in exclude_terms if term.strip())
+
+    def is_excluded(self, job_title: str) -> bool:
+        """Return True if the raw job title contains any exclude term."""
+        if not self._exclude_terms:
+            return False
+        normalized_title = job_title.lower()
+        return any(term in normalized_title for term in self._exclude_terms)
+
+
 class JobFilter:
     """Fuzzy-matches raw job titles against a configured list of
     canonical target titles."""

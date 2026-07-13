@@ -74,6 +74,20 @@ def test_malformed_sheet_id_raises(tmp_path, monkeypatch):
         _load_settings(str(env_path))
 
 
+def test_exclude_terms_defaults_to_empty_when_not_set(tmp_path, monkeypatch):
+    monkeypatch.delenv("EXCLUDE_TERMS", raising=False)
+    env_path = _write_env(tmp_path)
+    settings = _load_settings(str(env_path))
+    assert settings.exclude_terms == ()
+
+
+def test_exclude_terms_parsed_from_csv(tmp_path, monkeypatch):
+    monkeypatch.delenv("EXCLUDE_TERMS", raising=False)
+    env_path = _write_env(tmp_path, {"EXCLUDE_TERMS": "Intern, Volunteer,Unpaid"})
+    settings = _load_settings(str(env_path))
+    assert settings.exclude_terms == ("Intern", "Volunteer", "Unpaid")
+
+
 def test_missing_title_scores_file_raises(tmp_path, monkeypatch):
     monkeypatch.delenv("TITLE_SCORES_FILE", raising=False)
     env_path = _write_env(

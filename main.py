@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 
 from config import ConfigError, Settings, get_settings
-from core.job_filter import JobFilter
+from core.job_filter import ExcludeFilter, JobFilter
 from core.scoring import ScoringConfigError, ScoringEngine
 from pipeline.orchestrator import Orchestrator
 from sources.adzuna import AdzunaSource
@@ -128,6 +128,9 @@ def main() -> int:
         canonical_titles=scoring_engine.canonical_titles,
         threshold=settings.fuzzy_match_threshold,
     )
+    exclude_filter = ExcludeFilter(settings.exclude_terms)
+    if settings.exclude_terms:
+        logger.info("Exclude terms active: %s", ", ".join(settings.exclude_terms))
     sources = _build_sources(settings)
 
     with Database(settings.database_path) as database:
@@ -141,6 +144,7 @@ def main() -> int:
             search_terms=settings.search_terms,
             search_countries=settings.search_countries,
             min_score=settings.min_score,
+            exclude_filter=exclude_filter,
         )
         stats = orchestrator.run()
         _export_leads(settings, database)

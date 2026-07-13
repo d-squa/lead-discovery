@@ -22,6 +22,7 @@ class RunStats:
     jobs_checked: int = 0
     jobs_matched: int = 0
     jobs_ignored: int = 0
+    jobs_excluded: int = 0
     jobs_duplicate: int = 0
     jobs_inserted: int = 0
     errors: list[str] = field(default_factory=list)
@@ -46,6 +47,7 @@ class RunStats:
         return (
             f"Jobs checked: {self.jobs_checked} | "
             f"Matched: {self.jobs_matched} | "
+            f"Excluded: {self.jobs_excluded} | "
             f"Ignored: {self.jobs_ignored} | "
             f"Duplicates: {self.jobs_duplicate} | "
             f"Inserted: {self.jobs_inserted} | "

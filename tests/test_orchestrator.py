@@ -8,7 +8,7 @@ from datetime import date
 
 import pytest
 
-from core.job_filter import JobFilter
+from core.job_filter import ExcludeFilter, JobFilter
 from core.scoring import ScoringEngine
 from exceptions import SourceError
 from models.job import Job
@@ -72,7 +72,12 @@ def scoring_engine() -> ScoringEngine:
 
 
 def _make_orchestrator(
-    sources: list[JobSource], database: Database, job_filter: JobFilter, scoring_engine: ScoringEngine, min_score: int = 50
+    sources: list[JobSource],
+    database: Database,
+    job_filter: JobFilter,
+    scoring_engine: ScoringEngine,
+    min_score: int = 50,
+    exclude_filter: ExcludeFilter | None = None,
 ) -> Orchestrator:
     return Orchestrator(
         sources=sources,
@@ -82,6 +87,7 @@ def _make_orchestrator(
         search_terms=("paid media",),
         search_countries=("gb",),
         min_score=min_score,
+        exclude_filter=exclude_filter,
     )
 
 
@@ -235,3 +241,82 @@ class TestOrchestratorRunStats:
         assert stats.jobs_ignored == 1
         assert stats.jobs_duplicate == 1
         assert stats.duration_seconds >= 0
+
+
+class TestOrchestratorExcludeFilter:
+    def test_excluded_title_is_not_inserted(
+        self, database: Database, job_filter: JobFilter, scoring_engine: ScoringEngine
+    ) -> None:
+        source = FakeSource("fake", jobs=[_job(job_title="Paid Media Manager Intern")])
+        exclude_filter = ExcludeFilter(("Intern",))
+        orchestrator = _make_orchestrator(
+            [source], database, job_filter, scoring_engine, exclude_filter=exclude_filter
+        )
+
+        stats = orchestrator.run()
+
+        assert stats.jobs_excluded == 1
+        assert stats.jobs_matched == 0
+        assert stats.jobs_inserted == 0
+        assert len(database.get_unexported_leads()) == 0
+
+    def test_excluded_job_takes_priority_over_a_title_that_would_otherwise_match(
+        self, database: Database, job_filter: JobFilter, scoring_engine: ScoringEngine
+    ) -> None:
+        # "Paid Media Manager" would normally match and score 100 -
+        # exclusion must short-circuit before that ever happens.
+        source = FakeSource("fake", jobs=[_job(job_title="Paid Media Manager - Unpaid Internship")])
+        exclude_filter = ExcludeFilter(("Unpaid",))
+        orchestrator = _make_orchestrator(
+            [source], database, job_filter, scoring_engine, exclude_filter=exclude_filter
+        )
+
+        stats = orchestrator.run()
+
+        assert stats.jobs_excluded == 1
+        assert stats.jobs_inserted == 0
+
+    def test_non_excluded_titles_still_process_normally(
+        self, database: Database, job_filter: JobFilter, scoring_engine: ScoringEngine
+    ) -> None:
+        source = FakeSource("fake", jobs=[_job(job_title="Paid Media Manager")])
+        exclude_filter = ExcludeFilter(("Intern", "Volunteer"))
+        orchestrator = _make_orchestrator(
+            [source], database, job_filter, scoring_engine, exclude_filter=exclude_filter
+        )
+
+        stats = orchestrator.run()
+
+        assert stats.jobs_excluded == 0
+        assert stats.jobs_inserted == 1
+
+    def test_no_exclude_filter_configured_behaves_identically_to_before(
+        self, database: Database, job_filter: JobFilter, scoring_engine: ScoringEngine
+    ) -> None:
+        source = FakeSource("fake", jobs=[_job(job_title="Paid Media Manager")])
+        orchestrator = _make_orchestrator([source], database, job_filter, scoring_engine)
+
+        stats = orchestrator.run()
+
+        assert stats.jobs_excluded == 0
+        assert stats.jobs_inserted == 1
+
+    def test_excluded_and_duplicate_counted_separately(
+        self, database: Database, job_filter: JobFilter, scoring_engine: ScoringEngine
+    ) -> None:
+        jobs = [
+            _job(job_title="Marketing Intern", job_url="https://x.com/1"),
+            _job(job_title="Paid Media Manager", job_url="https://x.com/2"),
+            _job(job_title="Paid Media Manager", job_url="https://x.com/2"),  # duplicate
+        ]
+        source = FakeSource("fake", jobs=jobs)
+        exclude_filter = ExcludeFilter(("Intern",))
+        orchestrator = _make_orchestrator(
+            [source], database, job_filter, scoring_engine, exclude_filter=exclude_filter
+        )
+
+        stats = orchestrator.run()
+
+        assert stats.jobs_excluded == 1
+        assert stats.jobs_duplicate == 1
+        assert stats.jobs_inserted == 1

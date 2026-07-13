@@ -2,7 +2,8 @@
 Pipeline orchestrator.
 
 Runs the full daily sequence: fetch jobs from every configured source,
-dedupe, filter by title, score, and persist qualified leads. One
+dedupe, exclude by blocklisted terms, filter by title, score, and
+persist qualified leads. One
 failing source is logged and skipped rather than aborting the whole
 run - this matters because this runs unattended, once a day, and a
 single flaky API shouldn't block leads from every other source.
@@ -15,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from core.deduplicator import Deduplicator
-from core.job_filter import JobFilter
+from core.job_filter import ExcludeFilter, JobFilter
 from core.scoring import ScoringEngine
 from exceptions import SourceError
 from models.company import Company
@@ -40,6 +41,7 @@ class Orchestrator:
         search_terms: tuple[str, ...],
         search_countries: tuple[str, ...],
         min_score: int,
+        exclude_filter: ExcludeFilter | None = None,
     ) -> None:
         self._sources = sources
         self._database = database
@@ -48,6 +50,7 @@ class Orchestrator:
         self._search_terms = search_terms
         self._search_countries = search_countries
         self._min_score = min_score
+        self._exclude_filter = exclude_filter or ExcludeFilter(())
         self._deduplicator = Deduplicator(database)
 
     def run(self) -> RunStats:
@@ -93,9 +96,13 @@ class Orchestrator:
             self._process_job(job, stats)
 
     def _process_job(self, job: Job, stats: RunStats) -> None:
-        """Run a single job through dedupe -> filter -> score -> persist."""
+        """Run a single job through dedupe -> exclude -> filter -> score -> persist."""
         if not self._deduplicator.is_new(job):
             stats.jobs_duplicate += 1
+            return
+
+        if self._exclude_filter.is_excluded(job.job_title):
+            stats.jobs_excluded += 1
             return
 
         matched_title = self._job_filter.match(job.job_title)
