@@ -87,6 +87,8 @@ class LeverSource(JobSource):
                 job_url=job_url,
                 posted_date=self._parse_created_at(raw_posting.get("createdAt")),
                 description=(raw_posting.get("descriptionPlain") or "").strip(),
+                # Lever's public Postings API doesn't expose salary/
+                # compensation data. Job.salary stays None here.
             )
         except Exception as exc:  # defensive: one bad record shouldn't break the batch
             logger.warning("Failed to normalize Lever posting %r: %s", raw_posting, exc)

@@ -94,6 +94,9 @@ class GreenhouseSource(JobSource):
                 job_url=job_url,
                 posted_date=self._parse_date(raw_job.get("updated_at")),
                 description=_strip_html(raw_description),
+                # Greenhouse's public Job Board API never exposes salary
+                # data, regardless of query params - unlike Ashby, there's
+                # no opt-in flag for it. Job.salary stays None here.
             )
         except Exception as exc:  # defensive: one bad record shouldn't break the batch
             logger.warning("Failed to normalize Greenhouse job %r: %s", raw_job, exc)

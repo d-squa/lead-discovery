@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS leads (
     score INTEGER NOT NULL,
     company TEXT NOT NULL,
     job_title TEXT NOT NULL,
+    salary TEXT,
     location TEXT NOT NULL,
     country TEXT NOT NULL,
     source TEXT NOT NULL,
@@ -84,9 +85,30 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys = ON")
 
     def initialize_schema(self) -> None:
-        """Create tables if they don't already exist. Safe to call every run."""
+        """Create tables if they don't already exist, and apply any
+        pending lightweight migrations. Safe to call every run."""
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        self._migrate_add_salary_column()
+
+    def _migrate_add_salary_column(self) -> None:
+        """Add the salary column to an existing leads table that
+        predates it.
+
+        CREATE TABLE IF NOT EXISTS is a no-op on a table that already
+        exists, so a schema change alone doesn't reach databases
+        created before this column existed - including the one
+        already committed to the repo with real leads in it. This
+        makes the migration self-healing: harmless on a fresh database
+        (the column is already there, so this just hits "duplicate
+        column name" and is ignored) and effective on an existing one.
+        """
+        try:
+            self._conn.execute("ALTER TABLE leads ADD COLUMN salary TEXT")
+            self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
 
     # --- jobs_seen (dedup ledger) -------------------------------------
 
@@ -124,15 +146,16 @@ class Database:
         cursor = self._conn.execute(
             """
             INSERT OR IGNORE INTO leads (
-                job_hash, score, company, job_title, location, country,
+                job_hash, score, company, job_title, salary, location, country,
                 source, job_url, posted_date, found_at, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'New')
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'New')
             """,
             (
                 job.dedup_hash(),
                 score,
                 job.company,
                 job.job_title,
+                job.salary,
                 job.location,
                 job.country,
                 job.source,

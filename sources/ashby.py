@@ -58,7 +58,7 @@ class AshbySource(JobSource):
         return jobs
 
     def _fetch_board(self, job_board_name: str) -> list[dict]:
-        url = _URL_TEMPLATE.format(job_board_name=job_board_name)
+        url = f"{_URL_TEMPLATE.format(job_board_name=job_board_name)}?includeCompensation=true"
         data = fetch_json_with_retry(
             self._session, "GET", url, source_name="Ashby", timeout=_TIMEOUT_SECONDS
         )
@@ -83,10 +83,24 @@ class AshbySource(JobSource):
                 job_url=job_url,
                 posted_date=self._parse_date(raw_posting.get("publishedAt")),
                 description=(raw_posting.get("descriptionPlain") or "").strip(),
+                salary=self._extract_salary(raw_posting),
             )
         except Exception as exc:  # defensive: one bad record shouldn't break the batch
             logger.warning("Failed to normalize Ashby posting %r: %s", raw_posting, exc)
             return None
+
+    @staticmethod
+    def _extract_salary(raw_posting: dict) -> str | None:
+        """Ashby includes a per-posting 'compensation' object only when
+        requested via includeCompensation=true, and only when the
+        employer chose to publish it - commonly present for US roles
+        (state pay-transparency laws), often absent internationally.
+        compensationTierSummary is already a formatted display string,
+        e.g. '$81K - $87K - Offers Equity' - pass it through as-is
+        rather than re-parsing it into numeric fields."""
+        compensation = raw_posting.get("compensation") or {}
+        summary = compensation.get("compensationTierSummary")
+        return summary.strip() if isinstance(summary, str) and summary.strip() else None
 
     @staticmethod
     def _parse_date(raw_value: str | None) -> date | None:

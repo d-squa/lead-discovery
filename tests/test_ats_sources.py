@@ -64,6 +64,14 @@ class TestGreenhouseSource:
         assert "<" not in jobs[0].description
         assert "growth team" in jobs[0].description
 
+    def test_salary_always_none_greenhouse_api_never_exposes_it(self) -> None:
+        session = _mock_session(GREENHOUSE_VALID_RESPONSE)
+        source = GreenhouseSource(targets=ACME_TARGETS, session=session)
+
+        jobs = source.fetch_jobs(search_terms=(), countries=())
+
+        assert all(job.salary is None for job in jobs)
+
     def test_empty_board_returns_empty_list(self) -> None:
         session = _mock_session(GREENHOUSE_EMPTY_RESPONSE)
         source = GreenhouseSource(targets=ACME_TARGETS, session=session)
@@ -155,6 +163,14 @@ class TestLeverSource:
 
         assert jobs[0].job_url == "https://jobs.lever.co/acme/x/apply"
 
+    def test_salary_always_none_lever_public_api_never_exposes_it(self) -> None:
+        session = _mock_session(LEVER_VALID_RESPONSE)
+        source = LeverSource(targets=ACME_TARGETS, session=session)
+
+        jobs = source.fetch_jobs(search_terms=(), countries=())
+
+        assert all(job.salary is None for job in jobs)
+
 
 class TestAshbySource:
     def test_requires_at_least_one_target(self) -> None:
@@ -187,3 +203,30 @@ class TestAshbySource:
         jobs = source.fetch_jobs(search_terms=(), countries=())
 
         assert jobs[1].posted_date == date(2026, 7, 5)
+
+    def test_requests_include_compensation_param(self) -> None:
+        session = _mock_session(ASHBY_EMPTY_RESPONSE)
+        source = AshbySource(targets=ACME_TARGETS, session=session)
+
+        source.fetch_jobs(search_terms=(), countries=())
+
+        args, _ = session.request.call_args
+        assert "includeCompensation=true" in args[1]
+
+    def test_extracts_compensation_tier_summary_as_salary(self) -> None:
+        session = _mock_session(ASHBY_VALID_RESPONSE)
+        source = AshbySource(targets=ACME_TARGETS, session=session)
+
+        jobs = source.fetch_jobs(search_terms=(), countries=())
+
+        assert jobs[0].salary == "$81K - $87K - Offers Bonus"
+
+    def test_missing_compensation_object_gives_none_salary(self) -> None:
+        session = _mock_session(ASHBY_VALID_RESPONSE)
+        source = AshbySource(targets=ACME_TARGETS, session=session)
+
+        jobs = source.fetch_jobs(search_terms=(), countries=())
+
+        # Second fixture job (Product Designer) has no compensation key
+        # at all - common for international roles per Ashby's own docs.
+        assert jobs[1].salary is None

@@ -55,6 +55,23 @@ class TestFetchJobs:
         assert jobs[0].job_url == "https://jooble.org/jdp/123456/Paid-Media-Manager"
         assert jobs[0].posted_date == date(2026, 7, 8)
 
+    def test_salary_passed_through_from_raw_string_field(self) -> None:
+        session = _mock_session(VALID_RESPONSE)
+        source = JoobleSource(api_key="test-key", session=session)
+
+        jobs = source.fetch_jobs(search_terms=("paid media",), countries=("gb",))
+
+        assert jobs[0].salary == "45,000 - 55,000 GBP"
+
+    def test_missing_salary_becomes_none_not_empty_string(self) -> None:
+        session = _mock_session(VALID_RESPONSE)
+        source = JoobleSource(api_key="test-key", session=session)
+
+        jobs = source.fetch_jobs(search_terms=("paid media",), countries=("gb",))
+
+        # Second fixture job has salary: "" in the raw response.
+        assert jobs[1].salary is None
+
     def test_skips_job_missing_required_fields(self) -> None:
         session = _mock_session(VALID_RESPONSE)
         source = JoobleSource(api_key="test-key", session=session)

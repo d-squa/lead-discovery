@@ -94,6 +94,35 @@ class TestFetchJobs:
         assert jobs[0].country == "ZZ"
 
 
+class TestSalaryFormatting:
+    def test_min_and_max_present(self) -> None:
+        assert AdzunaSource._format_salary(40000, 48000) == "40,000 - 48,000"
+
+    def test_only_min_present(self) -> None:
+        assert AdzunaSource._format_salary(40000, None) == "40,000+"
+
+    def test_only_max_present(self) -> None:
+        assert AdzunaSource._format_salary(None, 48000) == "Up to 48,000"
+
+    def test_both_none_returns_none(self) -> None:
+        assert AdzunaSource._format_salary(None, None) is None
+
+    def test_no_currency_symbol_since_currency_varies_by_country(self) -> None:
+        # Deliberately no £/$/€ prefix - Adzuna doesn't state currency
+        # explicitly and guessing one per country risks mislabeling.
+        result = AdzunaSource._format_salary(40000, 48000)
+        assert "£" not in result and "$" not in result and "€" not in result
+
+    def test_end_to_end_from_fixture(self) -> None:
+        session = MagicMock()
+        session.request.return_value = _mock_response(VALID_RESPONSE)
+        source = AdzunaSource(app_id="id", app_key="key", session=session)
+
+        jobs = source.fetch_jobs(search_terms=("paid media",), countries=("gb",))
+
+        assert jobs[0].salary == "40,000 - 48,000"
+
+
 class TestUnsupportedCountryIsolation:
     def test_one_unsupported_country_does_not_block_others(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("sources.http_utils.time.sleep", lambda _: None)

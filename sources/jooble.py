@@ -99,6 +99,7 @@ class JoobleSource(JobSource):
                 job_url=job_url,
                 posted_date=self._parse_date(raw_job.get("updated")),
                 description=(raw_job.get("snippet") or "").strip(),
+                salary=(raw_job.get("salary") or "").strip() or None,
             )
         except Exception as exc:  # defensive: never let one bad record break the batch
             logger.warning("Failed to normalize Jooble job %r: %s", raw_job, exc)

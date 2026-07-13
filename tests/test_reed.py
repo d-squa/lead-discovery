@@ -95,6 +95,33 @@ class TestFetchJobs:
         assert ReedSource._parse_date("10/07/2026") == date(2026, 7, 10)
 
 
+class TestSalaryFormatting:
+    def test_min_and_max_present(self) -> None:
+        assert ReedSource._format_salary(40000, 48000) == "£40,000 - £48,000"
+
+    def test_only_min_present(self) -> None:
+        assert ReedSource._format_salary(40000, None) == "£40,000+"
+
+    def test_only_max_present(self) -> None:
+        assert ReedSource._format_salary(None, 48000) == "Up to £48,000"
+
+    def test_both_zero_returns_none_not_misleading_zero(self) -> None:
+        # Reed uses 0 to mean "unspecified", not "£0 salary" - must not
+        # produce a misleading "£0 - £0" in the sheet.
+        assert ReedSource._format_salary(0, 0) is None
+
+    def test_both_none_returns_none(self) -> None:
+        assert ReedSource._format_salary(None, None) is None
+
+    def test_end_to_end_from_fixture(self) -> None:
+        session = _mock_session(VALID_RESPONSE)
+        source = ReedSource(api_key="test-key", session=session)
+
+        jobs = source.fetch_jobs(search_terms=("paid media",), countries=())
+
+        assert jobs[0].salary == "£40,000 - £48,000"
+
+
 class TestErrorHandling:
     def test_raises_source_error_after_exhausting_retries(self, monkeypatch: pytest.MonkeyPatch) -> None:
         session = MagicMock()

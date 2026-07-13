@@ -30,6 +30,13 @@ class Job:
         posted_date: Date the job was posted, if the source provides
             it. None if unavailable.
         description: Raw or lightly-cleaned job description text.
+        salary: Human-readable salary/compensation string, normalized
+            per-source into a display string (currency and format vary
+            by source, deliberately not forced into numeric min/max
+            fields). None if the source doesn't expose salary data -
+            Greenhouse and Lever never do; Jooble, Reed, Adzuna, and
+            Ashby (with compensation enabled) do, when the employer
+            chose to publish it.
     """
 
     company: str
@@ -40,6 +47,7 @@ class Job:
     job_url: str
     posted_date: date | None
     description: str
+    salary: str | None = None
 
     def dedup_hash(self) -> str:
         """Stable hash used as the dedup key across daily runs.

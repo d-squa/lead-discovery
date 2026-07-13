@@ -83,6 +83,10 @@ ASHBY_VALID_RESPONSE = {
             "employmentType": "FullTime",
             "jobUrl": "https://jobs.ashbyhq.com/acme/perf-marketing-mgr",
             "applyUrl": "https://jobs.ashbyhq.com/acme/perf-marketing-mgr/apply",
+            "compensation": {
+                "compensationTierSummary": "$81K - $87K - Offers Bonus",
+                "scrapeableCompensationSalarySummary": "$81K - $87K",
+            },
         },
         {
             "title": "Product Designer",

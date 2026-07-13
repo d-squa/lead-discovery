@@ -91,10 +91,27 @@ class ReedSource(JobSource):
                 job_url=job_url,
                 posted_date=self._parse_date(raw_job.get("date")),
                 description=(raw_job.get("jobDescription") or "").strip(),
+                salary=self._format_salary(raw_job.get("minimumSalary"), raw_job.get("maximumSalary")),
             )
         except Exception as exc:  # defensive: one bad record shouldn't break the batch
             logger.warning("Failed to normalize Reed job %r: %s", raw_job, exc)
             return None
+
+    @staticmethod
+    def _format_salary(minimum: object, maximum: object) -> str | None:
+        """Reed gives numeric minimumSalary/maximumSalary in GBP, often
+        0 or missing when unspecified. Format as a display string,
+        returning None rather than a misleading '£0' when both are
+        absent or zero."""
+        min_val = minimum if isinstance(minimum, (int, float)) and minimum > 0 else None
+        max_val = maximum if isinstance(maximum, (int, float)) and maximum > 0 else None
+        if min_val and max_val:
+            return f"£{min_val:,.0f} - £{max_val:,.0f}"
+        if min_val:
+            return f"£{min_val:,.0f}+"
+        if max_val:
+            return f"Up to £{max_val:,.0f}"
+        return None
 
     @staticmethod
     def _parse_date(raw_value: str | None) -> date | None:

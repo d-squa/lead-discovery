@@ -82,15 +82,16 @@ class TestExportLeads:
 
         appended_rows = worksheet.append_rows.call_args[0][0]
         row = appended_rows[0]
-        # Score, Company, Job Title, Location, Country, Source, Job URL, Date Found, Status
+        # Score, Company, Job Title, Salary, Location, Country, Source, Job URL, Date Found, Status
         assert row[0] == 100
         assert row[1] == "Acme Real Estate"
         assert row[2] == "Paid Media Manager"
-        assert row[3] == "Doha, Qatar"
-        assert row[4] == "Qatar"
-        assert row[5] == "jooble"
-        assert row[6] == "https://example.com/jobs/1"
-        assert row[8] == "New"
+        assert row[3] == "Not specified"  # no salary set on the fixture job
+        assert row[4] == "Doha, Qatar"
+        assert row[5] == "Qatar"
+        assert row[6] == "jooble"
+        assert row[7] == "https://example.com/jobs/1"
+        assert row[9] == "New"
 
     def test_empty_leads_list_does_not_call_api(self) -> None:
         client, worksheet = _mock_client_with_worksheet()
@@ -109,7 +110,7 @@ class TestExportLeads:
 
         header_call = worksheet.append_row.call_args[0][0]
         assert header_call == [
-            "Score", "Company", "Job Title", "Location", "Country",
+            "Score", "Company", "Job Title", "Salary", "Location", "Country",
             "Source", "Job URL", "Date Found", "Status",
         ]
 
@@ -232,6 +233,6 @@ class TestDateFormatting:
         exporter.export_leads(leads)
 
         row = worksheet.append_rows.call_args[0][0][0]
-        date_found = row[7]
+        date_found = row[8]
         assert len(date_found) == 10  # YYYY-MM-DD, no time component
         assert "T" not in date_found

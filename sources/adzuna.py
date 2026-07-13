@@ -132,10 +132,28 @@ class AdzunaSource(JobSource):
                 job_url=job_url,
                 posted_date=self._parse_date(raw_job.get("created")),
                 description=(raw_job.get("description") or "").strip(),
+                salary=self._format_salary(raw_job.get("salary_min"), raw_job.get("salary_max")),
             )
         except Exception as exc:  # defensive: one bad record shouldn't break the batch
             logger.warning("Failed to normalize Adzuna job %r: %s", raw_job, exc)
             return None
+
+    @staticmethod
+    def _format_salary(minimum: object, maximum: object) -> str | None:
+        """Adzuna gives numeric salary_min/salary_max, currency implied
+        by country rather than stated explicitly in the response. Kept
+        as a plain number rather than guessing a currency symbol per
+        country - safer than silently mislabeling e.g. a German salary
+        with a £ sign."""
+        min_val = minimum if isinstance(minimum, (int, float)) and minimum > 0 else None
+        max_val = maximum if isinstance(maximum, (int, float)) and maximum > 0 else None
+        if min_val and max_val:
+            return f"{min_val:,.0f} - {max_val:,.0f}"
+        if min_val:
+            return f"{min_val:,.0f}+"
+        if max_val:
+            return f"Up to {max_val:,.0f}"
+        return None
 
     @staticmethod
     def _parse_date(raw_value: str | None) -> date | None:

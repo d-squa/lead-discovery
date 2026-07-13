@@ -23,7 +23,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-_HEADER = ["Score", "Company", "Job Title", "Location", "Country", "Source", "Job URL", "Date Found", "Status"]
+_HEADER = ["Score", "Company", "Job Title", "Salary", "Location", "Country", "Source", "Job URL", "Date Found", "Status"]
 _DEFAULT_WORKSHEET_NAME = "Leads"
 
 
@@ -165,14 +165,15 @@ class GoogleSheetExporter:
     @staticmethod
     def _lead_to_row(lead: sqlite3.Row) -> list[object]:
         """Map a leads table row to a sheet row in the fixed column
-        order: Score, Company, Job Title, Location, Country, Source,
-        Job URL, Date Found, Status."""
+        order: Score, Company, Job Title, Salary, Location, Country,
+        Source, Job URL, Date Found, Status."""
         found_at = lead["found_at"] or ""
         date_found = found_at.split("T")[0] if "T" in found_at else found_at
         return [
             lead["score"],
             lead["company"],
             lead["job_title"],
+            lead["salary"] or "Not specified",
             lead["location"],
             lead["country"],
             lead["source"],

@@ -1,4 +1,5 @@
 """Unit tests for storage/database.py using an in-memory SQLite DB."""
+import sqlite3
 from datetime import date, datetime
 
 import pytest
@@ -43,6 +44,52 @@ class TestSchema:
         # Calling twice must not raise or duplicate anything.
         db.initialize_schema()
         db.initialize_schema()
+
+    def test_salary_migration_adds_column_to_pre_existing_file_database(self, tmp_path) -> None:
+        db_path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE leads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_hash TEXT NOT NULL UNIQUE,
+                score INTEGER NOT NULL,
+                company TEXT NOT NULL,
+                job_title TEXT NOT NULL,
+                location TEXT NOT NULL,
+                country TEXT NOT NULL,
+                source TEXT NOT NULL,
+                job_url TEXT NOT NULL,
+                posted_date TEXT,
+                found_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'New',
+                exported_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO leads (job_hash, score, company, job_title, location, "
+            "country, source, job_url, found_at) VALUES "
+            "('abc123', 90, 'Old Co', 'Old Title', 'Somewhere', 'Unknown', "
+            "'jooble', 'https://x.com', '2026-01-01T00:00:00')"
+        )
+        conn.commit()
+        conn.close()
+
+        db = Database(db_path)
+        db.initialize_schema()  # must not raise, and must add the missing column
+
+        cursor = db._conn.execute("SELECT * FROM leads WHERE job_hash = 'abc123'")
+        row = cursor.fetchone()
+        assert row["company"] == "Old Co"  # pre-existing data survived
+        assert row["salary"] is None  # new column, backfilled as NULL
+
+        # And new inserts with salary now work correctly on this
+        # migrated database.
+        new_job = _sample_job(job_url="https://x.com/new", salary="£50,000 - £60,000")
+        db.mark_seen(new_job)
+        assert db.insert_lead(new_job, score=95) is True
+        db.close()
 
 
 class TestJobsSeenDedup:
