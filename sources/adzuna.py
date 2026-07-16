@@ -10,14 +10,17 @@ Implements JobSource against Adzuna's REST API:
 
 Unlike Jooble's location (free text) or Reed (no country param at
 all), Adzuna's country is a required URL path segment validated
-against a fixed list of ~20 supported countries (mainly US/UK/EU/
-Australia/Canada/India - notably NOT Gulf/MENA, confirmed during
-Milestone 2 research). Querying an unsupported country returns a real
-HTTP 404. Each (search_term, country) pair is requested and error-
-isolated independently here, so one unsupported country in
-SEARCH_COUNTRIES doesn't abort results from the countries that do
-work - this matters in practice since the default config includes
-"ae", which Adzuna doesn't support.
+against a fixed list of supported countries. Querying an unsupported
+country returns a real HTTP 404. Each (search_term, country) pair is
+requested and error-isolated independently here, so one unsupported
+country doesn't abort results from the countries that do work.
+
+Countries known in advance to always fail are configured externally
+in config/country_exclusions.json (not hardcoded here) and injected
+via the exclude_countries constructor param - see
+sources/country_exclusions.py. Skipping those before attempting a
+request avoids wasting the retry/backoff delay in http_utils on a
+request that will never succeed.
 
 Reference: https://developer.adzuna.com/docs/search
 """
@@ -60,26 +63,45 @@ class AdzunaSource(JobSource):
 
     name = "adzuna"
 
-    def __init__(self, app_id: str, app_key: str, session: requests.Session | None = None) -> None:
+    def __init__(
+        self,
+        app_id: str,
+        app_key: str,
+        exclude_countries: tuple[str, ...] = (),
+        session: requests.Session | None = None,
+    ) -> None:
         if not app_id or not app_key:
             raise ValueError("AdzunaSource requires non-empty app_id and app_key")
         self._app_id = app_id
         self._app_key = app_key
+        self._exclude_countries = frozenset(c.lower() for c in exclude_countries)
         self._session = session or requests.Session()
 
     def fetch_jobs(self, search_terms: tuple[str, ...], countries: tuple[str, ...]) -> list[Job]:
         """Fetch jobs for every (search_term, country) combination.
 
-        A country Adzuna doesn't support is logged and skipped, not
-        fatal to the whole fetch - see module docstring for why this
-        isolation matters specifically for Adzuna.
+        Countries in self._exclude_countries (from
+        config/country_exclusions.json) are skipped before any request
+        is attempted. Any OTHER unsupported country - one not in that
+        config - still gets a real attempt and is caught per-pair if
+        it 404s; the exclusion list is a fast-path optimization, not
+        the only safety net.
         """
         if not countries:
             logger.warning("AdzunaSource requires at least one country; defaulting to 'gb'")
             countries = ("gb",)
 
+        skipped = tuple(c for c in countries if c.lower() in self._exclude_countries)
+        supported = tuple(c for c in countries if c.lower() not in self._exclude_countries)
+        if skipped:
+            logger.info(
+                "Adzuna: skipping configured country exclusion(s): %s", ", ".join(skipped)
+            )
+        if not supported:
+            return []
+
         jobs: list[Job] = []
-        for country in countries:
+        for country in supported:
             for term in search_terms:
                 try:
                     raw_jobs = self._search(term, country)

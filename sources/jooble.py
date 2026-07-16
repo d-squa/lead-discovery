@@ -35,10 +35,16 @@ class JoobleSource(JobSource):
 
     name = "jooble"
 
-    def __init__(self, api_key: str, session: requests.Session | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        exclude_countries: tuple[str, ...] = (),
+        session: requests.Session | None = None,
+    ) -> None:
         if not api_key:
             raise ValueError("JoobleSource requires a non-empty api_key")
         self._api_key = api_key
+        self._exclude_countries = frozenset(c.lower() for c in exclude_countries)
         self._session = session or requests.Session()
         self._url = _BASE_URL.format(api_key=api_key)
 
@@ -49,10 +55,23 @@ class JoobleSource(JobSource):
         as a single search, so all search_terms are sent together in
         one request per country rather than one request per term - this
         keeps request volume low against the free-tier quota.
+
+        Countries in self._exclude_countries (from
+        config/country_exclusions.json) are skipped before any request.
+        Jooble doesn't currently reject any country (its location field
+        is free text, not validated), so this is a no-op unless that
+        ever changes or a specific location proves not worth searching -
+        kept for interface consistency with Adzuna, and so a future
+        problem country needs only a config edit, not a code change.
         """
         keywords = ", ".join(search_terms)
         # If no countries are configured, do a single unscoped search.
         locations: tuple[str, ...] = countries or ("",)
+
+        skipped = tuple(loc for loc in locations if loc.lower() in self._exclude_countries)
+        locations = tuple(loc for loc in locations if loc.lower() not in self._exclude_countries)
+        if skipped:
+            logger.info("Jooble: skipping configured country exclusion(s): %s", ", ".join(skipped))
 
         jobs: list[Job] = []
         for location in locations:

@@ -188,3 +188,46 @@ class TestErrorHandling:
 
         jobs = source.fetch_jobs(search_terms=("paid media",), countries=("gb",))
         assert jobs == []
+
+
+class TestCountryExclusions:
+    def test_no_exclusions_by_default(self) -> None:
+        session = _mock_session(EMPTY_RESPONSE)
+        source = JoobleSource(api_key="test-key", session=session)
+
+        source.fetch_jobs(search_terms=("paid media",), countries=("ae", "gb"))
+
+        assert session.request.call_count == 2
+
+    def test_excluded_country_is_skipped(self) -> None:
+        session = _mock_session(EMPTY_RESPONSE)
+        source = JoobleSource(
+            api_key="test-key", exclude_countries=("ae",), session=session
+        )
+
+        source.fetch_jobs(search_terms=("paid media",), countries=("ae", "gb"))
+
+        assert session.request.call_count == 1
+        _, kwargs = session.request.call_args
+        assert kwargs["json"]["location"] == "gb"
+
+    def test_all_countries_excluded_makes_zero_requests(self) -> None:
+        session = _mock_session(EMPTY_RESPONSE)
+        source = JoobleSource(
+            api_key="test-key", exclude_countries=("ae", "sa"), session=session
+        )
+
+        jobs = source.fetch_jobs(search_terms=("paid media",), countries=("ae", "sa"))
+
+        assert jobs == []
+        session.request.assert_not_called()
+
+    def test_exclusion_matching_is_case_insensitive(self) -> None:
+        session = _mock_session(EMPTY_RESPONSE)
+        source = JoobleSource(
+            api_key="test-key", exclude_countries=("AE",), session=session
+        )
+
+        source.fetch_jobs(search_terms=("paid media",), countries=("ae",))
+
+        session.request.assert_not_called()
