@@ -30,6 +30,7 @@ from datetime import date, datetime
 
 import requests
 
+from core.work_mode import classify_work_mode
 from exceptions import SourceError
 from models.job import Job
 from sources.base import JobSource
@@ -145,6 +146,8 @@ class AdzunaSource(JobSource):
 
             location = ((raw_job.get("location") or {}).get("display_name") or "").strip()
 
+            description = (raw_job.get("description") or "").strip()
+
             return Job(
                 company=company,
                 job_title=title,
@@ -153,8 +156,11 @@ class AdzunaSource(JobSource):
                 source=self.name,
                 job_url=job_url,
                 posted_date=self._parse_date(raw_job.get("created")),
-                description=(raw_job.get("description") or "").strip(),
+                description=description,
                 salary=self._format_salary(raw_job.get("salary_min"), raw_job.get("salary_max")),
+                # Adzuna has no structured work-mode field - inferred
+                # from title/location/description text.
+                work_mode=classify_work_mode(title, location, description),
             )
         except Exception as exc:  # defensive: one bad record shouldn't break the batch
             logger.warning("Failed to normalize Adzuna job %r: %s", raw_job, exc)

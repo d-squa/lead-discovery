@@ -72,6 +72,26 @@ class TestFetchJobs:
         # Second fixture job has salary: "" in the raw response.
         assert jobs[1].salary is None
 
+    def test_work_mode_inferred_from_title_and_location(self) -> None:
+        # Second fixture job: title "Senior Media Buyer - Remote",
+        # location "Remote - EMEA" - both signal Remote.
+        session = _mock_session(VALID_RESPONSE)
+        source = JoobleSource(api_key="test-key", session=session)
+
+        jobs = source.fetch_jobs(search_terms=("paid media",), countries=("gb",))
+
+        assert jobs[1].work_mode == "Remote"
+
+    def test_work_mode_none_when_no_keyword_present(self) -> None:
+        # First fixture job: "Paid Media Manager" in "London, UK" -
+        # no remote/hybrid/onsite keyword anywhere.
+        session = _mock_session(VALID_RESPONSE)
+        source = JoobleSource(api_key="test-key", session=session)
+
+        jobs = source.fetch_jobs(search_terms=("paid media",), countries=("gb",))
+
+        assert jobs[0].work_mode is None
+
     def test_skips_job_missing_required_fields(self) -> None:
         session = _mock_session(VALID_RESPONSE)
         source = JoobleSource(api_key="test-key", session=session)

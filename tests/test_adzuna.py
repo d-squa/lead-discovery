@@ -122,6 +122,37 @@ class TestSalaryFormatting:
 
         assert jobs[0].salary == "40,000 - 48,000"
 
+    def test_work_mode_inferred_from_description(self) -> None:
+        response = {
+            "results": [
+                {
+                    "id": "1",
+                    "title": "Paid Media Manager",
+                    "company": {"display_name": "Acme Co"},
+                    "location": {"display_name": "London"},
+                    "created": "2026-07-01T00:00:00Z",
+                    "redirect_url": "https://example.com/1",
+                    "description": "This is a fully remote role, work from anywhere in the UK.",
+                }
+            ]
+        }
+        session = MagicMock()
+        session.request.return_value = _mock_response(response)
+        source = AdzunaSource(app_id="id", app_key="key", session=session)
+
+        jobs = source.fetch_jobs(search_terms=("paid media",), countries=("gb",))
+
+        assert jobs[0].work_mode == "Remote"
+
+    def test_work_mode_none_when_no_keyword_present(self) -> None:
+        session = MagicMock()
+        session.request.return_value = _mock_response(VALID_RESPONSE)
+        source = AdzunaSource(app_id="id", app_key="key", session=session)
+
+        jobs = source.fetch_jobs(search_terms=("paid media",), countries=("gb",))
+
+        assert jobs[0].work_mode is None
+
 
 class TestCountryExclusions:
     def test_excluded_country_never_makes_a_request(self) -> None:

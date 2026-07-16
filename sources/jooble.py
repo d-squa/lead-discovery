@@ -17,6 +17,7 @@ from datetime import date
 
 import requests
 
+from core.work_mode import classify_work_mode
 from exceptions import SourceError
 from models.job import Job
 from sources.base import JobSource
@@ -109,16 +110,22 @@ class JoobleSource(JobSource):
                 logger.warning("Skipping Jooble job missing required fields: %r", raw_job)
                 return None
 
+            location = (raw_job.get("location") or "").strip()
+            description = (raw_job.get("snippet") or "").strip()
+
             return Job(
                 company=company,
                 job_title=title,
-                location=(raw_job.get("location") or "").strip(),
+                location=location,
                 country="Unknown",  # resolved later by core/location parsing
                 source=self.name,
                 job_url=job_url,
                 posted_date=self._parse_date(raw_job.get("updated")),
-                description=(raw_job.get("snippet") or "").strip(),
+                description=description,
                 salary=(raw_job.get("salary") or "").strip() or None,
+                # Jooble has no structured work-mode field - inferred
+                # from title/location/description text.
+                work_mode=classify_work_mode(title, location, description),
             )
         except Exception as exc:  # defensive: never let one bad record break the batch
             logger.warning("Failed to normalize Jooble job %r: %s", raw_job, exc)
